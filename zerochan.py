@@ -91,10 +91,14 @@ def get_imgurls(keyword, keyword_url, keyword_file):
 
 
 def main():
-    def download_worker(url, dest_path):
-        with urllib.request.urlopen(url) as sk, \
-                open(dest_path, 'wb') as of:
-            shutil.copyfileobj(sk, of)
+    def download_worker(download_queue):
+        while True:
+            url, dest_path = download_queue.get()
+            if url == None:
+                break
+            with urllib.request.urlopen(url) as sk, \
+                    open(dest_path, 'wb') as of:
+                shutil.copyfileobj(sk, of)
 
     keyword = urllib.parse.unquote(sys.argv[1].replace("+", " "))
     keyword_url = urllib.parse.quote(keyword.replace(" ", "+"), safe="+")
@@ -108,6 +112,12 @@ def main():
         os.mkdir(dirname)
 
     pool = []
+    download_queue = queue.Queue()
+    for _ in range(NUM_THREAD):
+        pool.append(threading.Thread(target=download_worker,
+                                     args=(download_queue,)))
+        pool[-1].start()
+
     for url in imgurls:
         filename = urllib.parse.unquote(
             urllib.parse.urlparse(url).path.split('/')[-1]).replace(':', ';')
@@ -118,11 +128,10 @@ def main():
 
         if not os.path.exists(dest_path):
             logging.info('Writing to ' + dest_path)
-            pool.append(
-                threading.Thread(target=download_worker,
-                                 args=(url, dest_path)))
-            pool[-1].start()
+            download_queue.put((url, dest_path))
     try:
+        for _ in range(NUM_THREAD):
+            download_queue.put((None, None))
         for t in pool:
             t.join()
     except KeyboardInterrupt:
